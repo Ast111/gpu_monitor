@@ -23,6 +23,9 @@ SSH_CONTROL_PERSIST = os.environ.get("SSH_CONTROL_PERSIST", "60s")
 SSH_USE_CONTROL = bool(SSH_CONTROL_PATH) and os.name != "nt"
 SSH_CONNECT_TIMEOUT = int(os.environ.get("SSH_CONNECT_TIMEOUT", "15"))
 SSH_FILE_TIMEOUT = int(os.environ.get("SSH_FILE_TIMEOUT", "45"))
+SSH_COMMAND_TIMEOUT = int(os.environ.get("SSH_COMMAND_TIMEOUT", "45"))
+SSH_COMMAND_OUTPUT_LIMIT = int(os.environ.get("SSH_COMMAND_OUTPUT_LIMIT", "20000"))
+SSH_COMMAND_COMPLETION_LIMIT = int(os.environ.get("SSH_COMMAND_COMPLETION_LIMIT", "200"))
 GPU_QUERY = (
     "nvidia-smi --query-gpu=index,name,temperature.gpu,"
     "utilization.gpu,memory.used,memory.total "
@@ -257,6 +260,114 @@ def _ssh_error_text(result):
     return (result.stderr or result.stdout or "").strip()
 
 
+def _trim_output(text, limit):
+    if not text:
+        return ""
+    if limit <= 0 or len(text) <= limit:
+        return text
+    return text[:limit] + "\n... (truncated)"
+
+
+def _run_ssh_command(host, command, cwd=None):
+    marker = f"__GPU_MONITOR_PWD__{uuid.uuid4().hex}__"
+    prefix = f"cd {_quote_sh(cwd)} && " if cwd else ""
+    trailer = f'code=$?; printf "\\n{marker}%s|%s\\n" "$code" "$PWD"'
+    full_command = f"{prefix}{command}\n{trailer}"
+    cmd = _ssh_base_cmd(host)
+    cmd.extend([host, "bash", "-lc", _quote_sh(full_command)])
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=SSH_COMMAND_TIMEOUT,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return {
+            "ok": False,
+            "error": "ssh timed out",
+            "exit_code": None,
+            "stdout": "",
+            "stderr": "",
+            "cwd": cwd or "",
+        }
+
+    stdout_raw = result.stdout or ""
+    stderr_raw = result.stderr or ""
+    cwd_value = None
+    exit_code = result.returncode
+    if marker in stdout_raw:
+        before, _, after = stdout_raw.rpartition(marker)
+        stdout_raw = before
+        after_lines = after.splitlines()
+        if after_lines:
+            marker_line = after_lines[0].strip()
+            if marker_line:
+                parts = marker_line.split("|", 1)
+                if parts and parts[0].isdigit():
+                    exit_code = int(parts[0])
+                if len(parts) > 1:
+                    cwd_value = parts[1].strip()
+
+    stdout = _trim_output(stdout_raw.strip(), SSH_COMMAND_OUTPUT_LIMIT)
+    stderr = _trim_output(stderr_raw.strip(), SSH_COMMAND_OUTPUT_LIMIT)
+    if exit_code != 0:
+        error_text = _ssh_error_text(result) or f"command exited with {exit_code}"
+        return {
+            "ok": False,
+            "error": error_text,
+            "exit_code": exit_code,
+            "stdout": stdout,
+            "stderr": stderr,
+            "cwd": cwd_value or cwd or "",
+        }
+    return {
+        "ok": True,
+        "exit_code": exit_code,
+        "stdout": stdout,
+        "stderr": stderr,
+        "cwd": cwd_value or cwd or "",
+    }
+
+
+def _run_ssh_completion(host, prefix, cwd=None, mode="file"):
+    cmd = _ssh_base_cmd(host)
+    quoted_prefix = _quote_sh(prefix or "")
+    cd_prefix = f"cd {_quote_sh(cwd)} && " if cwd else ""
+    if mode == "command":
+        complete_cmd = f"{cd_prefix}compgen -c -- {quoted_prefix}"
+    else:
+        complete_cmd = f"{cd_prefix}compgen -f -- {quoted_prefix}"
+    cmd.extend([host, "bash", "-lc", _quote_sh(complete_cmd)])
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return [], "ssh timed out"
+    if result.returncode != 0:
+        error_text = _ssh_error_text(result)
+        if not error_text:
+            error_text = f"ssh exited with {result.returncode}"
+        return [], error_text
+    matches = []
+    seen = set()
+    for line in result.stdout.splitlines():
+        item = line.strip()
+        if not item or item in seen:
+            continue
+        seen.add(item)
+        matches.append(item)
+        if len(matches) >= SSH_COMMAND_COMPLETION_LIMIT:
+            break
+    return matches, ""
+
+
 def _run_ssh(host):
     cmd = _ssh_base_cmd(host)
     cmd.extend([host, GPU_QUERY])
@@ -336,12 +447,15 @@ def _run_ssh(host):
 
 def _run_ssh_processes(host):
     cmd = _ssh_base_cmd(host)
+    remote_cmd = (
+        "command -v python3 >/dev/null 2>&1 && exec python3 - || exec python -"
+    )
     cmd.extend(
         [
             host,
             "sh",
             "-c",
-            "command -v python3 >/dev/null 2>&1 && exec python3 - || exec python -",
+            _quote_sh(remote_cmd),
         ]
     )
     try:
@@ -382,7 +496,7 @@ def _run_ssh_processes(host):
 def _remote_file_size(host, remote_path):
     cmd = _ssh_base_cmd(host)
     quoted = _quote_sh(remote_path)
-    cmd.extend([host, "sh", "-c", f"ls -ln -- {quoted}"])
+    cmd.extend([host, "sh", "-c", _quote_sh(f"ls -ln -- {quoted}")])
     try:
         result = subprocess.run(
             cmd,
@@ -414,7 +528,7 @@ def _remote_file_size(host, remote_path):
 def _upload_via_ssh(host, remote_path, source, length):
     cmd = _ssh_base_cmd(host)
     quoted = _quote_sh(remote_path)
-    cmd.extend([host, "sh", "-c", f"cat > {quoted}"])
+    cmd.extend([host, "sh", "-c", _quote_sh(f"cat > {quoted}")])
     proc = subprocess.Popen(
         cmd,
         stdin=subprocess.PIPE,
@@ -706,6 +820,75 @@ class GPURequestHandler(BaseHTTPRequestHandler):
 
             results = fetch_statuses(hosts)
             self._send_json({"results": results})
+            return
+
+        if parsed.path == "/api/command":
+            length = int(self.headers.get("Content-Length", "0") or 0)
+            raw = self.rfile.read(length).decode("utf-8") if length else ""
+            try:
+                payload = json.loads(raw) if raw else {}
+            except json.JSONDecodeError:
+                self._send_text("invalid json", status=HTTPStatus.BAD_REQUEST)
+                return
+            host = payload.get("host")
+            command = payload.get("command")
+            if not host or not isinstance(host, str):
+                self._send_json(
+                    {"ok": False, "error": "missing host"},
+                    status=HTTPStatus.BAD_REQUEST,
+                )
+                return
+            if not command or not isinstance(command, str):
+                self._send_json(
+                    {"ok": False, "error": "missing command"},
+                    status=HTTPStatus.BAD_REQUEST,
+                )
+                return
+            cwd = payload.get("cwd")
+            if cwd is not None and not isinstance(cwd, str):
+                cwd = ""
+            result = _run_ssh_command(host, command, cwd=cwd or "")
+            self._send_json(result)
+            return
+
+        if parsed.path == "/api/command-complete":
+            length = int(self.headers.get("Content-Length", "0") or 0)
+            raw = self.rfile.read(length).decode("utf-8") if length else ""
+            try:
+                payload = json.loads(raw) if raw else {}
+            except json.JSONDecodeError:
+                self._send_text("invalid json", status=HTTPStatus.BAD_REQUEST)
+                return
+            host = payload.get("host")
+            prefix = payload.get("prefix")
+            mode = payload.get("mode")
+            cwd = payload.get("cwd")
+            if not host or not isinstance(host, str):
+                self._send_json(
+                    {"ok": False, "error": "missing host"},
+                    status=HTTPStatus.BAD_REQUEST,
+                )
+                return
+            if prefix is None or not isinstance(prefix, str):
+                self._send_json(
+                    {"ok": False, "error": "missing prefix"},
+                    status=HTTPStatus.BAD_REQUEST,
+                )
+                return
+            if mode not in ("command", "file"):
+                mode = "file"
+            if cwd is not None and not isinstance(cwd, str):
+                cwd = ""
+            matches, error_text = _run_ssh_completion(
+                host, prefix, cwd=cwd or "", mode=mode
+            )
+            if error_text:
+                self._send_json(
+                    {"ok": False, "error": error_text},
+                    status=HTTPStatus.BAD_REQUEST,
+                )
+                return
+            self._send_json({"ok": True, "matches": matches})
             return
 
         if parsed.path == "/api/upload":

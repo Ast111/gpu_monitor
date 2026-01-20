@@ -21,11 +21,24 @@ const detailMetricUtilEl = document.getElementById("detailMetricUtil");
 const detailMetricMemEl = document.getElementById("detailMetricMem");
 const detailGpuListEl = document.getElementById("detailGpuList");
 const detailErrorEl = document.getElementById("detailError");
+const commandBtn = document.getElementById("commandBtn");
 const transferBtn = document.getElementById("transferBtn");
 const transferBackdropEl = document.getElementById("transferBackdrop");
 const transferModalEl = document.getElementById("transferModal");
 const transferCloseBtn = document.getElementById("transferCloseBtn");
 const transferHostLabelEl = document.getElementById("transferHostLabel");
+const commandBackdropEl = document.getElementById("commandBackdrop");
+const commandModalEl = document.getElementById("commandModal");
+const commandCloseBtn = document.getElementById("commandCloseBtn");
+const commandHostLabelEl = document.getElementById("commandHostLabel");
+const commandScreenEl = document.getElementById("commandScreen");
+const commandPromptEl = document.getElementById("commandPrompt");
+const commandInputEl = document.getElementById("commandInput");
+const commandRunBtn = document.getElementById("commandRunBtn");
+const commandClearBtn = document.getElementById("commandClearBtn");
+const commandStatusEl = document.getElementById("commandStatus");
+const commandExitEl = document.getElementById("commandExit");
+const commandOutputEl = document.getElementById("commandOutput");
 const uploadTabBtn = document.getElementById("uploadTabBtn");
 const downloadTabBtn = document.getElementById("downloadTabBtn");
 const uploadPanelEl = document.getElementById("uploadPanel");
@@ -69,6 +82,8 @@ let visibleHosts = new Set();
 let manualFilter = false;
 let uploadInProgress = false;
 let downloadInProgress = false;
+let commandInProgress = false;
+const commandSessions = new Map();
 
 const formatPercent = (value) => `${value}%`;
 const formatMiB = (value) => `${value.toLocaleString("en-US")} MiB`;
@@ -119,6 +134,83 @@ function formatTime(date) {
     minute: "2-digit",
     second: "2-digit",
   }).format(date);
+}
+
+function scrollTerminalToBottom() {
+  if (!commandOutputEl) {
+    return;
+  }
+  commandOutputEl.scrollTop = commandOutputEl.scrollHeight;
+}
+
+function resizeCommandInput() {
+  if (!commandInputEl) {
+    return;
+  }
+  commandInputEl.style.height = "auto";
+  commandInputEl.style.height = `${commandInputEl.scrollHeight}px`;
+}
+
+function getCommandSession(host) {
+  if (!host) {
+    return null;
+  }
+  if (!commandSessions.has(host)) {
+    commandSessions.set(host, {
+      cwd: "",
+      history: [],
+      historyIndex: -1,
+      buffer: "",
+    });
+  }
+  return commandSessions.get(host);
+}
+
+function formatPrompt(host, cwd) {
+  const displayPath = cwd || "~";
+  return `${host}:${displayPath}$`;
+}
+
+function setCommandPrompt(host, cwd) {
+  if (!commandPromptEl) {
+    return;
+  }
+  commandPromptEl.textContent = formatPrompt(host, cwd);
+}
+
+function setCommandOutput(text) {
+  if (commandOutputEl) {
+    commandOutputEl.textContent = text;
+    scrollTerminalToBottom();
+  }
+}
+
+function appendCommandOutput(session, text) {
+  if (!session) {
+    return;
+  }
+  const normalized = text ? text.replace(/\r\n/g, "\n") : "";
+  const next = session.buffer ? `${session.buffer}\n${normalized}` : normalized;
+  const limit = 60000;
+  session.buffer = next.length > limit ? next.slice(-limit) : next;
+  setCommandOutput(session.buffer || "Output will appear here.");
+}
+
+function longestCommonPrefix(list) {
+  if (!list.length) {
+    return "";
+  }
+  let prefix = list[0];
+  for (let i = 1; i < list.length; i += 1) {
+    const item = list[i];
+    while (item.indexOf(prefix) !== 0) {
+      prefix = prefix.slice(0, -1);
+      if (!prefix) {
+        return "";
+      }
+    }
+  }
+  return prefix;
 }
 
 function setStatus(message) {
@@ -172,6 +264,9 @@ function closeFilterPopover() {
 }
 
 function setTransferButtonsEnabled(enabled) {
+  if (commandBtn) {
+    commandBtn.disabled = !enabled;
+  }
   if (transferBtn) {
     transferBtn.disabled = !enabled;
   }
@@ -214,6 +309,72 @@ function closeTransferModal() {
     transferModalEl.classList.remove("open");
     transferModalEl.setAttribute("aria-hidden", "true");
     transferBackdropEl.classList.remove("open");
+  }
+}
+
+function openCommandModal() {
+  if (!selectedHost) {
+    showToast("Select a server first.");
+    return;
+  }
+  if (commandHostLabelEl) {
+    commandHostLabelEl.textContent = `Server: ${selectedHost}`;
+  }
+  const session = getCommandSession(selectedHost);
+  if (session) {
+    setCommandPrompt(selectedHost, session.cwd);
+    setCommandOutput(session.buffer || "Output will appear here.");
+    session.historyIndex = session.history.length;
+  }
+  if (commandStatusEl) {
+    commandStatusEl.textContent = "Ready.";
+  }
+  if (commandExitEl) {
+    commandExitEl.textContent = "Exit --";
+  }
+  if (commandModalEl && commandBackdropEl) {
+    commandModalEl.classList.add("open");
+    commandModalEl.setAttribute("aria-hidden", "false");
+    commandBackdropEl.classList.add("open");
+  }
+  if (commandInputEl) {
+    commandInputEl.focus();
+  }
+  resizeCommandInput();
+  scrollTerminalToBottom();
+  ensureCommandCwd();
+}
+
+function closeCommandModal() {
+  if (commandModalEl && commandBackdropEl) {
+    commandModalEl.classList.remove("open");
+    commandModalEl.setAttribute("aria-hidden", "true");
+    commandBackdropEl.classList.remove("open");
+  }
+}
+
+function resetCommandOutput(message = "Output will appear here.") {
+  const session = getCommandSession(selectedHost);
+  if (session) {
+    session.buffer = "";
+    session.historyIndex = session.history.length;
+  }
+  setCommandOutput(message);
+  if (commandStatusEl) {
+    commandStatusEl.textContent = "Ready.";
+  }
+  if (commandExitEl) {
+    commandExitEl.textContent = "Exit --";
+  }
+}
+
+function setCommandBusy(isBusy) {
+  commandInProgress = isBusy;
+  if (commandRunBtn) {
+    commandRunBtn.disabled = isBusy;
+  }
+  if (commandInputEl) {
+    commandInputEl.disabled = isBusy;
   }
 }
 
@@ -898,6 +1059,203 @@ function startDownload() {
   xhr.send();
 }
 
+async function fetchCommandData(host, command, cwd) {
+  const response = await fetch("/api/command", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ host, command, cwd }),
+  });
+  const raw = await response.text();
+  let data = null;
+  if (raw) {
+    try {
+      data = JSON.parse(raw);
+    } catch (error) {
+      data = null;
+    }
+  }
+  if (!response.ok || !data) {
+    const message = data?.error || raw || "Command failed.";
+    throw new Error(message);
+  }
+  return data;
+}
+
+async function ensureCommandCwd() {
+  if (!selectedHost) {
+    return;
+  }
+  if (commandInProgress) {
+    return;
+  }
+  const session = getCommandSession(selectedHost);
+  if (!session || session.cwd) {
+    return;
+  }
+  const requestHost = selectedHost;
+  try {
+    const data = await fetchCommandData(selectedHost, "pwd", session.cwd);
+    if (selectedHost !== requestHost) {
+      return;
+    }
+    if (data.cwd && !session.cwd) {
+      session.cwd = data.cwd;
+      setCommandPrompt(selectedHost, session.cwd);
+    }
+  } catch (error) {
+    showToast(error.message || "Failed to fetch working directory.");
+  }
+}
+
+async function handleTabCompletion() {
+  if (commandInProgress || !selectedHost || !commandInputEl) {
+    return;
+  }
+  const session = getCommandSession(selectedHost);
+  if (session && !session.cwd) {
+    await ensureCommandCwd();
+  }
+  const value = commandInputEl.value;
+  const cursor = commandInputEl.selectionStart ?? value.length;
+  const left = value.slice(0, cursor);
+  const match = left.match(/(^|\s)([^\s]*)$/);
+  if (!match) {
+    return;
+  }
+  const token = match[2] || "";
+  if (!token) {
+    return;
+  }
+  const tokenStart = cursor - token.length;
+  const beforeToken = value.slice(0, tokenStart);
+  const isFirstToken = !/\S/.test(beforeToken);
+  const mode = isFirstToken && !token.includes("/") ? "command" : "file";
+  try {
+    const response = await fetch("/api/command-complete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        host: selectedHost,
+        cwd: session?.cwd || "",
+        prefix: token,
+        mode,
+      }),
+    });
+    if (!response.ok) {
+      throw new Error("Completion failed.");
+    }
+    const data = await response.json();
+    if (!data.ok) {
+      throw new Error(data.error || "Completion failed.");
+    }
+    const matches = data.matches || [];
+    if (!matches.length) {
+      return;
+    }
+    if (matches.length === 1) {
+      const completion = matches[0];
+      commandInputEl.value =
+        value.slice(0, tokenStart) + completion + value.slice(cursor);
+      const caret = tokenStart + completion.length;
+      commandInputEl.setSelectionRange(caret, caret);
+      resizeCommandInput();
+      return;
+    }
+    const common = longestCommonPrefix(matches);
+    if (common && common.length > token.length) {
+      commandInputEl.value =
+        value.slice(0, tokenStart) + common + value.slice(cursor);
+      const caret = tokenStart + common.length;
+      commandInputEl.setSelectionRange(caret, caret);
+      resizeCommandInput();
+      return;
+    }
+    if (session) {
+      appendCommandOutput(session, matches.join("  "));
+    }
+  } catch (error) {
+    showToast(error.message || "Completion failed.");
+  }
+}
+
+async function runCommand(commandOverride = null) {
+  if (commandInProgress) {
+    return;
+  }
+  if (!selectedHost) {
+    showToast("Select a server first.");
+    return;
+  }
+  const session = getCommandSession(selectedHost);
+  const overrideValue = typeof commandOverride === "string" ? commandOverride : null;
+  const inputValue = commandInputEl?.value ?? "";
+  const commandValue = (overrideValue ?? inputValue).trim();
+  if (!commandValue) {
+    showToast("Enter a command.");
+    return;
+  }
+  if (commandInputEl) {
+    commandInputEl.value = "";
+    resizeCommandInput();
+  }
+  setCommandBusy(true);
+  if (commandStatusEl) {
+    commandStatusEl.textContent = "Running...";
+  }
+  if (commandExitEl) {
+    commandExitEl.textContent = "Exit --";
+  }
+  if (session) {
+    const prompt = formatPrompt(selectedHost, session.cwd);
+    appendCommandOutput(session, `${prompt} ${commandValue}`);
+    session.history.push(commandValue);
+    session.historyIndex = session.history.length;
+  }
+  try {
+    const data = await fetchCommandData(selectedHost, commandValue, session?.cwd || "");
+    if (data.cwd && session) {
+      session.cwd = data.cwd;
+      setCommandPrompt(selectedHost, session.cwd);
+    }
+    const parts = [];
+    if (data.stdout) {
+      parts.push(data.stdout);
+    }
+    if (data.stderr) {
+      parts.push(`[stderr]\n${data.stderr}`);
+    }
+    const outputText = parts.join("\n\n");
+    if (outputText && session) {
+      appendCommandOutput(session, outputText);
+    } else if (!outputText && session) {
+      appendCommandOutput(session, "");
+    }
+    if (commandExitEl) {
+      const exitCode = data.exit_code != null ? data.exit_code : "--";
+      commandExitEl.textContent = `Exit ${exitCode}`;
+    }
+    if (commandStatusEl) {
+      commandStatusEl.textContent = data.ok ? "Completed." : "Completed with errors.";
+    }
+    if (!data.ok) {
+      showToast(data.error || `Command failed (exit ${data.exit_code ?? "--"})`);
+    }
+  } catch (error) {
+    if (commandStatusEl) {
+      commandStatusEl.textContent = "Failed.";
+    }
+    if (commandExitEl) {
+      commandExitEl.textContent = "Exit --";
+    }
+    showToast(error.message || "Command failed.");
+  } finally {
+    setCommandBusy(false);
+    if (commandInputEl) {
+      commandInputEl.focus();
+    }
+  }
+}
+
 async function loadServers() {
   const response = await fetch("/api/servers");
   if (!response.ok) {
@@ -1005,6 +1363,7 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
     closeFilterPopover();
     closeTransferModal();
+    closeCommandModal();
   }
 });
 document.addEventListener("click", (event) => {
@@ -1027,11 +1386,22 @@ if (transferBtn) {
     openTransferModal("upload");
   });
 }
+if (commandBtn) {
+  commandBtn.addEventListener("click", () => {
+    openCommandModal();
+  });
+}
 if (transferCloseBtn) {
   transferCloseBtn.addEventListener("click", closeTransferModal);
 }
 if (transferBackdropEl) {
   transferBackdropEl.addEventListener("click", closeTransferModal);
+}
+if (commandCloseBtn) {
+  commandCloseBtn.addEventListener("click", closeCommandModal);
+}
+if (commandBackdropEl) {
+  commandBackdropEl.addEventListener("click", closeCommandModal);
 }
 if (uploadTabBtn) {
   uploadTabBtn.addEventListener("click", () => setActiveTransferTab("upload"));
@@ -1044,6 +1414,63 @@ if (uploadStartBtn) {
 }
 if (downloadStartBtn) {
   downloadStartBtn.addEventListener("click", startDownload);
+}
+if (commandRunBtn) {
+  commandRunBtn.addEventListener("click", () => runCommand());
+}
+if (commandClearBtn) {
+  commandClearBtn.addEventListener("click", () => resetCommandOutput());
+}
+if (commandInputEl) {
+  commandInputEl.addEventListener("input", () => {
+    resizeCommandInput();
+  });
+  commandInputEl.addEventListener("keydown", (event) => {
+    const session = getCommandSession(selectedHost);
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      runCommand();
+      return;
+    }
+    if (event.key === "Tab") {
+      event.preventDefault();
+      handleTabCompletion();
+      return;
+    }
+    if (event.key === "ArrowUp" && session?.history.length) {
+      if (commandInputEl.selectionStart > 0) {
+        return;
+      }
+      event.preventDefault();
+      if (session.historyIndex <= 0) {
+        session.historyIndex = 0;
+      } else if (session.historyIndex > 0) {
+        session.historyIndex -= 1;
+      }
+      commandInputEl.value = session.history[session.historyIndex] || "";
+      resizeCommandInput();
+      return;
+    }
+    if (event.key === "ArrowDown" && session?.history.length) {
+      if (commandInputEl.selectionStart < commandInputEl.value.length) {
+        return;
+      }
+      event.preventDefault();
+      if (session.historyIndex >= session.history.length - 1) {
+        session.historyIndex = session.history.length;
+        commandInputEl.value = "";
+      } else {
+        session.historyIndex += 1;
+        commandInputEl.value = session.history[session.historyIndex] || "";
+      }
+      resizeCommandInput();
+      return;
+    }
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "l") {
+      event.preventDefault();
+      resetCommandOutput("Output cleared.");
+    }
+  });
 }
 if (downloadPathInput && downloadNameInput) {
   downloadPathInput.addEventListener("change", () => {

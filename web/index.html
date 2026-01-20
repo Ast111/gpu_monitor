@@ -88,6 +88,7 @@
                   <div class="detail-sub">SSH target</div>
                 </div>
                 <div class="detail-actions">
+                  <button class="ghost" id="commandBtn" type="button">Command</button>
                   <button class="ghost" id="transferBtn" type="button">Transfer</button>
                   <div class="pill" id="detailPill">idle</div>
                 </div>
@@ -220,6 +221,51 @@
             </div>
             <div class="progress-note" id="downloadStatus"></div>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-backdrop" id="commandBackdrop"></div>
+    <div class="modal terminal-modal" id="commandModal" aria-hidden="true">
+      <div class="modal-head">
+        <div>
+          <h3>Remote command</h3>
+          <p id="commandHostLabel">Server: --</p>
+        </div>
+        <button class="ghost" id="commandCloseBtn" type="button">Close</button>
+      </div>
+      <div class="terminal-shell">
+        <div class="terminal-bar">
+          <div class="terminal-dots">
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+          <div class="terminal-title">SSH Terminal</div>
+        </div>
+        <div class="terminal-screen" id="commandScreen">
+          <div class="terminal-input">
+            <span class="terminal-prompt" id="commandPrompt">host:~$</span>
+            <textarea
+              id="commandInput"
+              rows="1"
+              placeholder="enter command"
+              autocomplete="off"
+              spellcheck="false"
+              autocapitalize="off"
+            ></textarea>
+          </div>
+          <pre class="terminal-output" id="commandOutput">Output will appear here.</pre>
+        </div>
+      </div>
+      <div class="terminal-footer">
+        <div class="terminal-meta">
+          <span id="commandStatus">Ready.</span>
+          <span id="commandExit">Exit --</span>
+        </div>
+        <div class="terminal-actions">
+          <button class="ghost" id="commandClearBtn" type="button">Clear</button>
+          <button class="primary" id="commandRunBtn" type="button">Run</button>
         </div>
       </div>
     </div>
