@@ -87,7 +87,10 @@
                   <div class="detail-host" id="detailHost">--</div>
                   <div class="detail-sub">SSH target</div>
                 </div>
-                <div class="pill" id="detailPill">idle</div>
+                <div class="detail-actions">
+                  <button class="ghost" id="transferBtn" type="button">Transfer</button>
+                  <div class="pill" id="detailPill">idle</div>
+                </div>
               </div>
               <div class="summary">
                 <div class="metric">
@@ -133,6 +136,93 @@
         <div class="server-pill">idle</div>
       </button>
     </template>
+
+    <div class="modal-backdrop" id="transferBackdrop"></div>
+    <div class="modal" id="transferModal" aria-hidden="true">
+      <div class="modal-head">
+        <div>
+          <h3>File transfer</h3>
+          <p id="transferHostLabel">Server: --</p>
+        </div>
+        <button class="ghost" id="transferCloseBtn" type="button">Close</button>
+      </div>
+      <div class="modal-tabs">
+        <button class="tab active" id="uploadTabBtn" type="button">Upload</button>
+        <button class="tab" id="downloadTabBtn" type="button">Download</button>
+      </div>
+      <div class="modal-body">
+        <div class="tab-panel active" id="uploadPanel">
+          <div class="field">
+            <label for="uploadFileInput">Local file</label>
+            <div class="dropzone" id="uploadDropzone" role="button" tabindex="0">
+              <span id="uploadDropText">Drop a file here or click to browse</span>
+            </div>
+            <input id="uploadFileInput" type="file" hidden />
+          </div>
+          <div class="field">
+            <label for="uploadPathInput">Remote path</label>
+            <input
+              id="uploadPathInput"
+              type="text"
+              placeholder="/home/user/project/"
+              autocomplete="off"
+              spellcheck="false"
+              autocapitalize="off"
+            />
+            <span class="field-hint">End with / to keep original filename.</span>
+          </div>
+          <button class="primary" id="uploadStartBtn" type="button">Start upload</button>
+          <div class="progress">
+            <div class="progress-bar">
+              <span id="uploadProgressBar"></span>
+            </div>
+            <div class="progress-meta">
+              <span id="uploadPercent">0%</span>
+              <span id="uploadSpeed">--</span>
+            </div>
+            <div class="progress-note" id="uploadStatus"></div>
+          </div>
+        </div>
+        <div class="tab-panel" id="downloadPanel">
+          <div class="field">
+            <label for="downloadPathInput">Remote path</label>
+            <input
+              id="downloadPathInput"
+              type="text"
+              placeholder="/home/user/file.log"
+              autocomplete="off"
+              spellcheck="false"
+              autocapitalize="off"
+            />
+          </div>
+          <div class="field">
+            <label for="downloadNameInput">Local filename</label>
+            <input
+              id="downloadNameInput"
+              type="text"
+              placeholder="file.log"
+              autocomplete="off"
+              spellcheck="false"
+              autocapitalize="off"
+            />
+            <span class="field-hint">Browser will ask where to save.</span>
+          </div>
+          <button class="primary" id="downloadStartBtn" type="button">
+            Start download
+          </button>
+          <div class="progress">
+            <div class="progress-bar">
+              <span id="downloadProgressBar"></span>
+            </div>
+            <div class="progress-meta">
+              <span id="downloadPercent">0%</span>
+              <span id="downloadSpeed">--</span>
+            </div>
+            <div class="progress-note" id="downloadStatus"></div>
+          </div>
+        </div>
+      </div>
+    </div>
 
     <script src="/app.js"></script>
   </body>

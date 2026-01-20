@@ -21,6 +21,31 @@ const detailMetricUtilEl = document.getElementById("detailMetricUtil");
 const detailMetricMemEl = document.getElementById("detailMetricMem");
 const detailGpuListEl = document.getElementById("detailGpuList");
 const detailErrorEl = document.getElementById("detailError");
+const transferBtn = document.getElementById("transferBtn");
+const transferBackdropEl = document.getElementById("transferBackdrop");
+const transferModalEl = document.getElementById("transferModal");
+const transferCloseBtn = document.getElementById("transferCloseBtn");
+const transferHostLabelEl = document.getElementById("transferHostLabel");
+const uploadTabBtn = document.getElementById("uploadTabBtn");
+const downloadTabBtn = document.getElementById("downloadTabBtn");
+const uploadPanelEl = document.getElementById("uploadPanel");
+const downloadPanelEl = document.getElementById("downloadPanel");
+const uploadDropzone = document.getElementById("uploadDropzone");
+const uploadDropText = document.getElementById("uploadDropText");
+const uploadFileInput = document.getElementById("uploadFileInput");
+const uploadPathInput = document.getElementById("uploadPathInput");
+const uploadStartBtn = document.getElementById("uploadStartBtn");
+const uploadProgressBar = document.getElementById("uploadProgressBar");
+const uploadPercentEl = document.getElementById("uploadPercent");
+const uploadSpeedEl = document.getElementById("uploadSpeed");
+const uploadStatusEl = document.getElementById("uploadStatus");
+const downloadPathInput = document.getElementById("downloadPathInput");
+const downloadNameInput = document.getElementById("downloadNameInput");
+const downloadStartBtn = document.getElementById("downloadStartBtn");
+const downloadProgressBar = document.getElementById("downloadProgressBar");
+const downloadPercentEl = document.getElementById("downloadPercent");
+const downloadSpeedEl = document.getElementById("downloadSpeed");
+const downloadStatusEl = document.getElementById("downloadStatus");
 const processPanelEl = document.getElementById("processPanel");
 const processTitleEl = document.getElementById("processTitle");
 const processSubtitleEl = document.getElementById("processSubtitle");
@@ -42,10 +67,51 @@ let detailHasData = false;
 let processHasData = false;
 let visibleHosts = new Set();
 let manualFilter = false;
+let uploadInProgress = false;
+let downloadInProgress = false;
 
 const formatPercent = (value) => `${value}%`;
 const formatMiB = (value) => `${value.toLocaleString("en-US")} MiB`;
 const formatOptionalMiB = (value) => (value == null ? "--" : formatMiB(value));
+
+function formatBytesPerSecond(value) {
+  if (!value || !Number.isFinite(value)) {
+    return "--";
+  }
+  const kb = value / 1024;
+  const mb = kb / 1024;
+  if (mb >= 1) {
+    return `${mb.toFixed(1)} MB/s`;
+  }
+  if (kb >= 1) {
+    return `${kb.toFixed(1)} KB/s`;
+  }
+  return `${Math.round(value)} B/s`;
+}
+
+function formatFileSize(bytes) {
+  if (!bytes || !Number.isFinite(bytes)) {
+    return "--";
+  }
+  const kb = bytes / 1024;
+  const mb = kb / 1024;
+  if (mb >= 1) {
+    return `${mb.toFixed(1)} MB`;
+  }
+  if (kb >= 1) {
+    return `${kb.toFixed(1)} KB`;
+  }
+  return `${Math.round(bytes)} B`;
+}
+
+function getBaseName(path) {
+  if (!path) {
+    return "";
+  }
+  const cleaned = path.replace(/\\+/g, "/");
+  const parts = cleaned.split("/");
+  return parts[parts.length - 1] || "";
+}
 
 function formatTime(date) {
   return new Intl.DateTimeFormat("en-US", {
@@ -103,6 +169,122 @@ function closeFilterPopover() {
   }
   filterPopoverEl.classList.remove("open");
   filterPopoverEl.setAttribute("aria-hidden", "true");
+}
+
+function setTransferButtonsEnabled(enabled) {
+  if (transferBtn) {
+    transferBtn.disabled = !enabled;
+  }
+}
+
+function setActiveTransferTab(tab) {
+  const isUpload = tab === "upload";
+  if (uploadTabBtn) {
+    uploadTabBtn.classList.toggle("active", isUpload);
+  }
+  if (downloadTabBtn) {
+    downloadTabBtn.classList.toggle("active", !isUpload);
+  }
+  if (uploadPanelEl) {
+    uploadPanelEl.classList.toggle("active", isUpload);
+  }
+  if (downloadPanelEl) {
+    downloadPanelEl.classList.toggle("active", !isUpload);
+  }
+}
+
+function openTransferModal(tab) {
+  if (!selectedHost) {
+    showToast("Select a server first.");
+    return;
+  }
+  if (transferHostLabelEl) {
+    transferHostLabelEl.textContent = `Server: ${selectedHost}`;
+  }
+  setActiveTransferTab(tab);
+  if (transferModalEl && transferBackdropEl) {
+    transferModalEl.classList.add("open");
+    transferModalEl.setAttribute("aria-hidden", "false");
+    transferBackdropEl.classList.add("open");
+  }
+}
+
+function closeTransferModal() {
+  if (transferModalEl && transferBackdropEl) {
+    transferModalEl.classList.remove("open");
+    transferModalEl.setAttribute("aria-hidden", "true");
+    transferBackdropEl.classList.remove("open");
+  }
+}
+
+function resetUploadProgress() {
+  if (uploadProgressBar) {
+    uploadProgressBar.style.width = "0%";
+  }
+  if (uploadPercentEl) {
+    uploadPercentEl.textContent = "0%";
+  }
+  if (uploadSpeedEl) {
+    uploadSpeedEl.textContent = "--";
+  }
+  if (uploadStatusEl) {
+    uploadStatusEl.textContent = "";
+  }
+  if (uploadDropText) {
+    uploadDropText.textContent = "Drop a file here or click to browse";
+  }
+}
+
+function resetDownloadProgress() {
+  if (downloadProgressBar) {
+    downloadProgressBar.style.width = "0%";
+  }
+  if (downloadPercentEl) {
+    downloadPercentEl.textContent = "0%";
+  }
+  if (downloadSpeedEl) {
+    downloadSpeedEl.textContent = "--";
+  }
+  if (downloadStatusEl) {
+    downloadStatusEl.textContent = "";
+  }
+}
+
+function setUploadBusy(isBusy) {
+  uploadInProgress = isBusy;
+  if (uploadStartBtn) {
+    uploadStartBtn.disabled = isBusy;
+  }
+  if (uploadFileInput) {
+    uploadFileInput.disabled = isBusy;
+  }
+  if (uploadPathInput) {
+    uploadPathInput.disabled = isBusy;
+  }
+}
+
+function setDownloadBusy(isBusy) {
+  downloadInProgress = isBusy;
+  if (downloadStartBtn) {
+    downloadStartBtn.disabled = isBusy;
+  }
+  if (downloadPathInput) {
+    downloadPathInput.disabled = isBusy;
+  }
+  if (downloadNameInput) {
+    downloadNameInput.disabled = isBusy;
+  }
+}
+
+function setUploadFile(file) {
+  if (!uploadDropText) {
+    return;
+  }
+  if (!file) {
+    uploadDropText.textContent = "Drop a file here or click to browse";
+    return;
+  }
+  uploadDropText.textContent = `${file.name} (${formatFileSize(file.size)})`;
 }
 
 function clearServers() {
@@ -169,6 +351,7 @@ function showDetailEmpty() {
   detailPillEl.textContent = "idle";
   resetDetailMetrics();
   resetProcessPanel();
+  setTransferButtonsEnabled(false);
 }
 
 function showDetailBody() {
@@ -185,6 +368,7 @@ function showNoServers() {
   detailErrorEl.textContent = "";
   resetDetailMetrics();
   resetProcessPanel();
+  setTransferButtonsEnabled(false);
 }
 
 function hideNoServers() {
@@ -530,11 +714,188 @@ function selectServer(host) {
   resetDetailMetrics();
   resetProcessPanel();
   setActiveServer(host);
+  setTransferButtonsEnabled(true);
   detailHostEl.textContent = host;
   showDetailBody();
   setStatus(`Loading ${host}...`);
   loadStatusForSelected({ force: true })
     .then((ok) => setStatus(ok ? `Loaded ${host}` : `Failed to load ${host}`));
+}
+
+function startUpload() {
+  if (uploadInProgress) {
+    return;
+  }
+  if (!selectedHost) {
+    showToast("Select a server first.");
+    return;
+  }
+  const file = uploadFileInput?.files?.[0];
+  const remotePath = uploadPathInput?.value?.trim();
+  if (!file) {
+    showToast("Choose a local file first.");
+    return;
+  }
+  if (!remotePath) {
+    showToast("Enter a remote path.");
+    return;
+  }
+  resetUploadProgress();
+  if (uploadStatusEl) {
+    uploadStatusEl.textContent = "Uploading...";
+  }
+  setUploadBusy(true);
+  const url = `/api/upload?host=${encodeURIComponent(selectedHost)}&path=${encodeURIComponent(
+    remotePath
+  )}&name=${encodeURIComponent(file.name)}`;
+  const xhr = new XMLHttpRequest();
+  const startTime = performance.now();
+  xhr.open("POST", url, true);
+  xhr.setRequestHeader("Content-Type", "application/octet-stream");
+  xhr.upload.onprogress = (event) => {
+    if (!uploadProgressBar || !uploadPercentEl || !uploadSpeedEl) {
+      return;
+    }
+    if (event.lengthComputable) {
+      const percent = Math.round((event.loaded / event.total) * 100);
+      uploadProgressBar.style.width = `${percent}%`;
+      uploadPercentEl.textContent = `${percent}%`;
+    } else {
+      uploadPercentEl.textContent = "--";
+    }
+    const elapsed = (performance.now() - startTime) / 1000;
+    const speed = elapsed > 0 ? event.loaded / elapsed : 0;
+    uploadSpeedEl.textContent = formatBytesPerSecond(speed);
+  };
+  xhr.onload = () => {
+    setUploadBusy(false);
+    const ok = xhr.status >= 200 && xhr.status < 300;
+    if (uploadProgressBar) {
+      uploadProgressBar.style.width = "100%";
+    }
+    if (uploadPercentEl) {
+      uploadPercentEl.textContent = ok ? "100%" : "0%";
+    }
+    if (uploadStatusEl) {
+      uploadStatusEl.textContent = ok ? "Upload completed." : "Upload failed.";
+    }
+    if (!ok) {
+      let message = xhr.responseText;
+      if (message) {
+        try {
+          const parsed = JSON.parse(message);
+          message = parsed.error || message;
+        } catch (error) {
+          message = xhr.responseText;
+        }
+      }
+      showToast(message || "Upload failed.");
+    }
+  };
+  xhr.onerror = () => {
+    setUploadBusy(false);
+    if (uploadStatusEl) {
+      uploadStatusEl.textContent = "Upload failed.";
+    }
+    showToast("Upload failed.");
+  };
+  xhr.send(file);
+}
+
+function startDownload() {
+  if (downloadInProgress) {
+    return;
+  }
+  if (!selectedHost) {
+    showToast("Select a server first.");
+    return;
+  }
+  const remotePath = downloadPathInput?.value?.trim();
+  if (!remotePath) {
+    showToast("Enter a remote path.");
+    return;
+  }
+  let localName = downloadNameInput?.value?.trim();
+  if (!localName) {
+    localName = getBaseName(remotePath) || "download.bin";
+  }
+  resetDownloadProgress();
+  if (downloadStatusEl) {
+    downloadStatusEl.textContent = "Downloading...";
+  }
+  setDownloadBusy(true);
+  const url = `/api/download?host=${encodeURIComponent(selectedHost)}&path=${encodeURIComponent(
+    remotePath
+  )}`;
+  const xhr = new XMLHttpRequest();
+  const startTime = performance.now();
+  xhr.open("GET", url, true);
+  xhr.responseType = "blob";
+  xhr.onprogress = (event) => {
+    if (!downloadProgressBar || !downloadPercentEl || !downloadSpeedEl) {
+      return;
+    }
+    if (event.lengthComputable) {
+      const percent = Math.round((event.loaded / event.total) * 100);
+      downloadProgressBar.style.width = `${percent}%`;
+      downloadPercentEl.textContent = `${percent}%`;
+    } else {
+      downloadPercentEl.textContent = "--";
+    }
+    const elapsed = (performance.now() - startTime) / 1000;
+    const speed = elapsed > 0 ? event.loaded / elapsed : 0;
+    downloadSpeedEl.textContent = formatBytesPerSecond(speed);
+  };
+  xhr.onload = () => {
+    setDownloadBusy(false);
+    if (xhr.status >= 200 && xhr.status < 300) {
+      if (downloadProgressBar) {
+        downloadProgressBar.style.width = "100%";
+      }
+      if (downloadPercentEl) {
+        downloadPercentEl.textContent = "100%";
+      }
+      if (downloadStatusEl) {
+        downloadStatusEl.textContent = "Download completed.";
+      }
+      const blob = xhr.response;
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = localName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(link.href);
+    } else {
+      if (downloadStatusEl) {
+        downloadStatusEl.textContent = "Download failed.";
+      }
+      if (xhr.response && typeof xhr.response.text === "function") {
+        xhr.response.text().then((message) => {
+          let text = message;
+          if (text) {
+            try {
+              const parsed = JSON.parse(text);
+              text = parsed.error || message;
+            } catch (error) {
+              text = message;
+            }
+          }
+          showToast(text || "Download failed.");
+        });
+      } else {
+        showToast(xhr.responseText || "Download failed.");
+      }
+    }
+  };
+  xhr.onerror = () => {
+    setDownloadBusy(false);
+    if (downloadStatusEl) {
+      downloadStatusEl.textContent = "Download failed.";
+    }
+    showToast("Download failed.");
+  };
+  xhr.send();
 }
 
 async function loadServers() {
@@ -643,6 +1004,7 @@ if (filterToggleBtn) {
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
     closeFilterPopover();
+    closeTransferModal();
   }
 });
 document.addEventListener("click", (event) => {
@@ -658,6 +1020,82 @@ document.addEventListener("click", (event) => {
   }
   closeFilterPopover();
 });
+if (transferBtn) {
+  transferBtn.addEventListener("click", () => {
+    resetUploadProgress();
+    resetDownloadProgress();
+    openTransferModal("upload");
+  });
+}
+if (transferCloseBtn) {
+  transferCloseBtn.addEventListener("click", closeTransferModal);
+}
+if (transferBackdropEl) {
+  transferBackdropEl.addEventListener("click", closeTransferModal);
+}
+if (uploadTabBtn) {
+  uploadTabBtn.addEventListener("click", () => setActiveTransferTab("upload"));
+}
+if (downloadTabBtn) {
+  downloadTabBtn.addEventListener("click", () => setActiveTransferTab("download"));
+}
+if (uploadStartBtn) {
+  uploadStartBtn.addEventListener("click", startUpload);
+}
+if (downloadStartBtn) {
+  downloadStartBtn.addEventListener("click", startDownload);
+}
+if (downloadPathInput && downloadNameInput) {
+  downloadPathInput.addEventListener("change", () => {
+    if (!downloadNameInput.value.trim()) {
+      downloadNameInput.value = getBaseName(downloadPathInput.value.trim());
+    }
+  });
+}
+if (uploadFileInput) {
+  uploadFileInput.addEventListener("change", () => {
+    const file = uploadFileInput.files?.[0] || null;
+    setUploadFile(file);
+  });
+}
+if (uploadDropzone && uploadFileInput) {
+  uploadDropzone.addEventListener("click", () => {
+    uploadFileInput.click();
+  });
+  uploadDropzone.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      uploadFileInput.click();
+    }
+  });
+  const stopEvent = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+  };
+  ["dragenter", "dragover"].forEach((name) => {
+    uploadDropzone.addEventListener(name, (event) => {
+      stopEvent(event);
+      uploadDropzone.classList.add("dragover");
+    });
+  });
+  ["dragleave", "drop"].forEach((name) => {
+    uploadDropzone.addEventListener(name, (event) => {
+      stopEvent(event);
+      uploadDropzone.classList.remove("dragover");
+    });
+  });
+  uploadDropzone.addEventListener("drop", (event) => {
+    const file = event.dataTransfer?.files?.[0];
+    if (!file) {
+      return;
+    }
+    const data = new DataTransfer();
+    data.items.add(file);
+    uploadFileInput.files = data.files;
+    setUploadFile(file);
+  });
+}
 
+setTransferButtonsEnabled(false);
 refreshAll();
 scheduleRefresh();
